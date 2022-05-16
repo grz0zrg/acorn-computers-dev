@@ -1,0 +1,61 @@
+ ------------------------
+- BASS = BASIC ASSEMBLER -
+ ------------------------
+ by Grz (Julien Verneuil)
+
+= Requirements
+This was made with !edit in Arculator emulator under RISC OS 3.11 / Acorn Archimedes A3xx, it probably work for any Archimedes with RISC OS 2 at least and probably also work in any RISC OS with BBC BASIC V.
+
+= What is BASS ?
+BASS is a pure BBC BASIC V aided assembler. It can be seen as a small/hackable wrapper (or framework) around BBC BASIC V inline assembly to facilitate assembly programming. It add features such as splitting assembly sources in multiple sources file, allow external binary data to be added to the program easily and of course assemble an executable program. It also add some easy options (through env. variables) to configure the assembler. All of that with reusable components, its sole purpose is to make it easy/fast to start any 100% assembler projects without losing BBC BASIC features. You just need to have !bass somewhere, an obey file which will setup your project/BASS environment and which will call BASS from your project directory and a "sources" file containing a list of sources path.
+
+= Why ?
+Boot the disk image in an emulator / real hardware, copy the template project and start to code your assembly project right away with RISC OS default tools like !edit, it will generate an executable etc... nothing else required to do/have and very lightweight.
+
+The original idea was to bootstrap my own assembly coding tool using nothing more than softwares provided by RISC OS 2 like BBC BASIC V. It helped me to learn some advanced BBC BASIC V features and some RISC OS features, it also put me in a 89-90s coding context.
+
+= Why is this usefull when BBC BASIC V can do the same ?
+BBC BASIC V provide all the things you need to do assembly projects but is imho bloated if you want to kickstart one, you will likely have to reuse some bits of "ugly" BBC BASIC V glue code for each projects, especially if you want a clean executable. BASS was just made to abstract that glue away and facilitate some stuff so you do not have to think about it: it take a bunch of source/data files, assemble them and produce an executable, as simple as that.
+
+= How to start a BASS project ?
+See template project for a ready to use template which you can copy/paste for each of your project. You will just have to modify "sources" to add your sources and eventually "data" if you have data to include or allocate. See also example project.
+
+Ideally create a "projects" directory and put all BASS content here, if you want to kickstart a new project just copy the template project. The !assemble file in the template looks for BASS in parent directory.
+
+Just remember that you must have a BBC BASIC FUNCTION (with your code inside!) named like the source filename in each of your sources so it get assembled. Ideally with a comment on the first line so any programming errors in your files show you in which file it happened.
+
+All assembly blocks should start like this to profit from the two-pass options:
+[
+OPT %bassPass
+...your code...
+]
+
+Then it is just BBC BASIC V syntax code.
+
+Note: The "src" directory in the project template is an advice, sources can be placed anywhere as long as the path in "sources" is correct.
+
+Your ready to distribute executable is contained in the "bin" directory.
+
+= How ?
+BASS is just a BBC BASIC V program which when run from a directory (via an obey file for example) load a mandatory "sources" text file and optional "data" text file which define the different sources of the project and binary data to include or allocate with associated labels.
+
+The "sources" file is just a list of BBC BASIC V sources containing a basic FUNCTION named like the filename. That function can then contain a mix of inline assembly and BBC BASIC V code, the inline assembly will be assembled following BASS provided parameters and the BBC BASIC V code can be used for some macro assembler features like code generation etc.
+
+Each sources must contain a BASIC function because BASS use the LIBRARY bbc basic function to load each sources then an EVAL to automatically call each functions, sources in the "sources" file are assembled in order.
+
+For external data BASS use RISC OS OS_File 12 to load external binary data files listed in the "data" text file, each files data is injected in the final binary in order by which they are defined and a given label (usable in any sources) is defined just before where the data is inserted. Data can also be specified to be allocated instead of allocated + copied which may be useful for things such as loaders.
+
+= Caveats
+
+There is some touchy globally defined variables beginning by "bass" so i recommend to not define any variables or labels by starting with "bass".
+
+Do not define/change "bassPass%", "P%", "O%", "L%" variables as well which are assembler variables.
+
+You may have to increase the BBC BASIC V allocated memory / program memory in the !assemble obey file if you get memory errors during assembly.
+
+Data/sources definition order may matter so if you have some big data i recommend to put them at the end / close to where they are used.
+
+= Credits
+Many thanks to the folks of the Stardot discord channel for answering many of my questions regarding RISC OS API, BBC BASIC and Acorn hardware while i was making this.
+
+06/05/2022
