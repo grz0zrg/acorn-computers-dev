@@ -8,6 +8,8 @@ The projects directory include BASS which is my BBC BASIC assembler framework, i
 
 The libs directory is my ARM2 library mainly targeting Acorn Archimedes. (probably works for any Acorn computers and modern RISC OS)
 
+*.ffb are tokenized BBC BASIC files, they are runnable / editable directly on Arculator emulator hostfs folder due to the extension. On the hardware you will likely want to change the filetype to BBC BASIC.
+
 ## Quickstart
 
 Within [Arculator](http://b-em.bbcmicro.com/arculator/) and RISC OS 3.11 machine setup :
