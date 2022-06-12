@@ -1,0 +1,4 @@
+; list of files to assemble (in order they are defined)
+src.main
+^.^.libs.gfxUtils
+^.^.libs.sysUtils
