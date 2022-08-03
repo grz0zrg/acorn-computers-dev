@@ -1,4 +1,0 @@
-dir <Obey$Dir>
-| increase on "No writable memory" error
-WimpSlot -min 128k -max 128k
-run bin.bin
