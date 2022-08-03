@@ -44,6 +44,10 @@ Within [Arculator](http://b-em.bbcmicro.com/arculator/) and RISC OS 3.11 machine
 * template2 is a graphics template which use my library with a 320x256 256 colors double buffered setup
 * template3 is a modern graphics template which use my library with a 1920x1080 24-bit colors 60Hz double buffered setup
 
+## Troubleshooting
+
+If you have strange line numbers on BASIC errors (i.e. not affiliated to the file physical line number) you may have to change the BASIC line number increment in your editor to 1, this happen with !edit for example.
+
 ## Documentation
 
 See [here](https://www.onirom.fr/wiki/blog/16-05-2022-BASS-BBC-BASIC-Assembler/) for a full explanation of the framework and guide.
