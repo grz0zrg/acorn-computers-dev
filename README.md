@@ -18,7 +18,7 @@ The `untokeniz` file is an Obey script which untokenize all BBC BASIC files (rec
 
 The `example` project show most features of the framework and is a full example which output `Hello World!`.
 
-### Arculator
+### Arculator
 
 Within [Arculator](http://b-em.bbcmicro.com/arculator/) and RISC OS 3.11 machine setup :
 
@@ -29,7 +29,7 @@ Within [Arculator](http://b-em.bbcmicro.com/arculator/) and RISC OS 3.11 machine
 * Assemble by double clicking `!assemble`, this will produce a `bin` file into `bin` directory
 * Run by double clicking on `!run`
 
-### RISC OS 5 / Raspberry PI
+### RISC OS 5 / Raspberry PI
 
 * Download and put everything into a storage medium that will be accessed within RISC OS 5
 * Change `metapply` file type to `Obey` and run it by double clicking on it
