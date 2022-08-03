@@ -1,0 +1,14 @@
+| Set this as Obey filetype and run it to untokenize the framework BASIC files.
+| Pretty useful to make the BASIC files readable.
+
+dir <Obey$Dir>
+SetType @.scripts.metapply BASIC
+Set bass$untokenize true
+Run @.scripts.metapply
+Set bass$untokenize false
+| Now run the generated Command script which untokenize all BASIC files.
+Echo "Untokenizing..."
+SetType @.scripts.untokeniz Command
+SetType @.scripts.untokdel Command
+Filer_Run @.scripts.untokeniz
+Filer_Run @.scripts.untokdel

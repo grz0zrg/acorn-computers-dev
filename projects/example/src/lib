@@ -1,0 +1,19 @@
+REM src.lib
+REM library containing some routines
+DEF FNlib
+[ OPT bassPass%
+ ; print
+ ; r0 = pointer to null-terminated string
+ .print
+  swi "OS_Write0"
+  mov r15,r14
+
+ ; exit cleanly
+ .exitCleanly
+  ldr r1,returnString
+  mov r2,#0
+  swi "OS_Exit"
+  .returnString
+   equs "ABEX"
+]
+=0

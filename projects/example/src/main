@@ -1,0 +1,14 @@
+REM src.main
+REM BASS features example
+DEF FNmain
+[ OPT bassPass%
+ ; gethelloWorldBinaryDataAddr is automatically defined by BASS
+ ; unless BassNoSugar env. variable is set to 1
+ bl gethelloWorldBinaryDataAddr
+ bl print
+
+ ; you can also use someStaticallyAllocatedSpace label (see datadef file)
+
+ bl exitCleanly
+]
+=0

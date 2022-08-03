@@ -1,0 +1,30 @@
+REM gfxUtilsEx - lib related to graphics (extended)
+REM require gfxUtils
+DEF FNgfxUtilsEx
+[ OPT bassPass%
+
+ ; switch screen bank (extended)
+ ; useful to let graphics overflow at the bottom at the expense of RAM
+ ; r3 = step (1 for standard cycle)
+ ; r0, r1, r2 = modified
+ .gfxUtilsExSwitchScreenBank
+   ; double buffering by switching screen bank
+   mov r0,#113
+   ldr r1,gfxUtilsCurrentScreenBank
+   swi "OS_Byte" ; switch screen
+
+   ldr r1,gfxUtilsCurrentScreenBank
+   add r1,r1,r3
+   ldr r2,gfxUtilsScreenBankCount
+   cmp r1,r2
+   ble gfxUtilsDoNotResetBankEx
+   mov r1,#1
+   .gfxUtilsDoNotResetBankEx
+   str r1,gfxUtilsCurrentScreenBank
+
+   ; switch VDU/draw bank
+   mov r0,#112
+   swi "OS_Byte" ; switch VDU/draw bank
+  mov r15,r14
+]
+=0

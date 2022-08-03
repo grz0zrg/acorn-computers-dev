@@ -1,0 +1,32 @@
+REM memUtils
+DEF FNmemUtils
+[ OPT bassPass%
+
+; copy bytes from src to dst
+;  r0 = source address
+;  r1 = destination address
+;  r2 = length (in bytes)
+; r0,r1,r2,r3 = corrupted
+.memUtilsCopyBytes
+ .memUtilsCopyBytesLoop
+  ldrb r3,[r0],#1
+  strb r3,[r1],#1
+  subs r2,r2,#1
+  bne memUtilsCopyBytesLoop
+ mov r15,r14
+
+; copy words from src to dst
+;  r0 = source address
+;  r1 = destination address
+;  r2 = length (in words)
+; r0,r1,r2,r3 = corrupted
+.memUtilsCopyWords
+ .memUtilsCopyWordsLoop
+  ldr r3,[r0],#4
+  str r3,[r1],#4
+  subs r2,r2,#1
+  bne memUtilsCopyWordsLoop
+ mov r15,r14
+
+]
+=0

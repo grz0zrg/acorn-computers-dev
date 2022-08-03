@@ -1,0 +1,311 @@
+REM gfxUtils - lib related to graphics
+DEF FNgfxUtils
+[ OPT bassPass%
+ ; graphics setup (r6 can be 0 to use the old way of defining screen modes)
+ ; r3 = screen / display MODE (old way)
+ ; r4 = number of screen banks
+ ; r5 = background COLOUR OF the banks after setup
+ ; r6 = mode string pointer (modern way)
+ ; r0,r1,r2,r3,r4,r6,r13 = modified
+ .gfxUtilsVideoSetup
+  adr r0,gfxUtilsScreenBankCount
+  str r4,[r0]
+
+  ; only enable VDU streams (printer and driver)
+  mov r0,#3
+  mov r1,#84
+  swi "OS_Byte"
+
+  ; setup display MODE
+  cmp r6,#0
+  beq gfxUtilsVideoSetupOld
+  ; new way
+  mov r0,#15
+  mov r1,r6
+  swi &65
+  b gfxUtilsVideoSetupContinue
+  ; old way
+  .gfxUtilsVideoSetupOld
+   mov r0,#22
+   swi "OS_WriteC"
+   ; 10 = 160x256x256
+   ; 13 = 320x256x256
+   ; 15 = 640x256x256
+   ; 28 = 640x480x256
+   mov r0,r3
+   swi "OS_WriteC"
+  .gfxUtilsVideoSetupContinue
+
+  ; resize screen area adequately based on mode size / current mem size
+  ; no need for this if the mode memory is enough
+  ; because mode change will allocate enough memory
+  ; but adaptation is needed for double/triple buffering etc.
+  mvn r0,#0 ; -1
+  mov r1,#7 ; get screen size
+  swi "OS_ReadModeVariable"
+
+  mul r1,r2,r4
+  mov r2,r1 ; r2 will be current mode screen size * nbBanks
+  ;
+  mov r0,#2
+  swi "OS_ReadDynamicArea"
+  ; r1 is actual screen area size
+  sub r1,r2,r1 ; make it fit
+  mov r0,#2
+  swi "OS_ChangeDynamicArea"
+
+  ; setup VDU (remove blinking cursor)
+  swi "OS_RemoveCursors"
+
+  ; make the lib draw calls ready
+  mov r13,r14
+  bl gfxUtilsUpdateScreenSize
+  bl gfxUtilsUpdateScreenAddr
+
+  .gfxUtilsVideoSetupClearBanks
+   mov r0,r5
+   bl gfxUtilsClearScreenb
+
+   bl gfxUtilsSwitchScreenBank
+   bl gfxUtilsUpdateScreenAddr
+
+   sub r4,r4,#1
+   cmp r4,#0
+   bne gfxUtilsVideoSetupClearBanks
+  mov r14,r13
+ mov r15,r14
+
+ ; switch screen bank (in case of double or more buffering)
+ ; r0, r1, r2 = modified
+ .gfxUtilsCurrentScreenBank
+   dcd 1
+ .gfxUtilsScreenBankCount
+   dcd 1
+ ; get current screen bank in r0
+ .gfxUtilsGetCurrentScreenBank
+  ldr r0,gfxUtilsCurrentScreenBank
+  mov r15,r14
+ .gfxUtilsSwitchScreenBank
+   ; switching screen bank
+   mov r0,#113
+   ldr r1,gfxUtilsCurrentScreenBank
+   swi "OS_Byte" ; switch screen
+
+   ldr r1,gfxUtilsCurrentScreenBank
+   add r1,r1,#1
+   ldr r2,gfxUtilsScreenBankCount
+   cmp r1,r2
+   ble gfxUtilsDoNotResetBank
+   mov r1,#1
+   .gfxUtilsDoNotResetBank
+   str r1,gfxUtilsCurrentScreenBank
+
+   ; switch VDU/draw bank
+   mov r0,#112
+   swi "OS_Byte" ; switch VDU/draw bank
+  mov r15,r14
+
+  ; slow (byte write) generic clear screen for <= 256 colors mode
+  ; r0 = color
+  ; r0,r1,r2,r3 = modified
+  .gfxUtilsClearScreenb
+    mov r3,r0
+    mvn r0,#0
+    mov r1,#7
+    swi "OS_ReadModeVariable"
+
+    ldr r1,gfxUtilsScreenAddr
+    .gfxUtilsClearScreenbLoop
+     strb r3,[r1],#1
+     sub r2,r2,#1
+     cmp r2,#0
+     bne gfxUtilsClearScreenbLoop
+    mov r15,r14
+
+  ; slow (word write) generic clear screen for > 256 colors mode
+  ; r0 = color
+  ; r0,r1,r2,r3 = modified
+  .gfxUtilsClearScreenw
+    mov r3,r0
+    mvn r0,#0
+    mov r1,#7
+    swi "OS_ReadModeVariable"
+
+    ldr r1,gfxUtilsScreenAddr
+    .gfxUtilsClearScreenwLoop
+     str r3,[r1],#1
+     sub r2,r2,#1
+     cmp r2,#0
+     bne gfxUtilsClearScreenwLoop
+     mov r15,r14
+
+ ; midly generic fast screen clearing
+ ; faster than OS_Byte 12, see unroll proc for fastest one on cache less CPU!
+ ; obviously a bit blocks constrained compared to the generic clear screen
+ ;  r0 = offset to add to current screen address (start pos.)
+ ;  r1 = length (depend on mode, 1px length = 52px clear for 256 cols mode etc.)
+ ;  r2 = color
+ .gfxUtilsReturnAddr
+  dcd 0
+
+ .gfxUtilsFastClearScreen
+   str r14,gfxUtilsReturnAddr
+
+   ldr r3,gfxUtilsScreenAddr
+   add r0,r3,r0
+
+   mov r3,r2:mov r4,r2:mov r5,r2
+   mov r6,r2:mov r7,r2:mov r8,r2:mov r9,r2:mov r10,r2
+   mov r11,r2:mov r12,r2:mov r13,r2:mov r14,r2
+   .gfxUtilsClearScreenloop
+    stmia r0!,{r2-r14}
+    subs r1,r1,#1
+   bne gfxUtilsClearScreenloop
+  ldr r15,gfxUtilsReturnAddr
+
+  ; r2 = screen size
+  .gfxUtilsScreenSize
+   dcd 0
+  .gfxUtilsUpdateScreenSize
+   mvn r0,#0 ; -1
+   mov r1,#7 ; get screen size
+   swi "OS_ReadModeVariable"
+   str r2,gfxUtilsScreenSize
+  mov r15,r14
+
+ ; screen address handling stuff
+ .gfxUtilsScreenAddrInput
+  dcd 148
+  dcd -1
+ .gfxUtilsScreenAddr
+  dcd 0
+ .gfxUtilsPreviousScreenAddr
+  dcd 0
+
+ ; get screen address in r0
+ .gfxUtilsGetScreenAddr
+  ldr r0,gfxUtilsScreenAddr
+  mov r15,r14
+
+ ; update screen address (sysUtilsScreenAddr label)
+ ; r0,r1 = modified
+ .gfxUtilsUpdateScreenAddr
+   ldr r1,gfxUtilsScreenAddr
+   str r1,gfxUtilsPreviousScreenAddr
+   adr r0,gfxUtilsScreenAddrInput
+   adr r1,gfxUtilsScreenAddr
+   swi "OS_ReadVduVariables"
+  mov r15,r14
+]
+=0
+
+REM gfxUtils16 - 16 colors mode related routines
+DEF FNgfxUtils16
+[ OPT bassPass%
+  ; slow clear screen for 16 colors mode
+  ; r0 = color (palette index)
+  ; r0, r1, r2 = modified
+  .gfxUtilsClearScreen16
+    orr r0,r0,r0, LSL #4
+
+    ldr r1,gfxUtilsScreenAddr
+    ldr r2,gfxUtilsScreenSize
+    .gfxUtilsClearScreen16Loop
+     strb r0,[r1],#1
+     sub r2,r2,#1
+     cmp r2,#0
+     bne gfxUtilsClearScreen16Loop
+     mov r15,r14
+
+ ; 16 cols pal data
+ .gfxUtilsPalData
+  dcb 19
+  dcb 0 ; palette index
+  dcb 16
+  dcb 0 ; r
+  dcb 0 ; g
+  dcb 0 ; b
+  align
+ ; = setup 16 colors palette
+ ; r0 = palette data addr (serie of bytes which represent red,green,blue for 16 colors)
+ .gfxUtilsSetupPalette16
+  mov r3,r0
+  adr r0,gfxUtilsPalData
+  mov r1,#6
+  mov r2,#0
+  .gfxUtilsSetupPalette16Loop
+   ldrb r4,[r3],#1
+   strb r4,[r0,#3]
+   ldrb r4,[r3],#1
+   strb r4,[r0,#4]
+   ldrb r4,[r3],#1
+   strb r4,[r0,#5]
+   strb r2,[r0,#1]
+   swi "OS_WriteN"
+
+   add r2,r2,#1
+   cmp r2,#16
+   bne gfxUtilsSetupPalette16Loop
+  mov r15,r14
+]
+=0
+
+REM gfxUtils256 - 256 colors mode related routines
+DEF FNgfxUtils256
+[ OPT bassPass%
+  ; slow clear screen for 256 colors screen mode
+  ; r0 = color (palette index)
+  ; r0, r1, r2 = modified
+  .gfxUtilsClearScreen256
+    orr r0,r0,r0, LSL #8
+    orr r0,r0,r0, LSL #16
+
+    ldr r1,gfxUtilsScreenAddr
+    ldr r2,gfxUtilsScreenSize
+    .gfxUtilsClearScreen256Loop
+     strb r0,[r1],#1
+     sub r2,r2,#1
+     cmp r2,#0
+     bne gfxUtilsClearScreen256Loop
+   mov r15,r14
+]
+=0
+
+REM gfxUtils16b - 16 bit colors mode related routines
+DEF FNgfxUtils16b
+[ OPT bassPass%
+  ; slow clear screen for 16 bit colors screen mode
+  ; r0 = color (RGB565)
+  ; r0, r1, r2 = modified
+  .gfxUtilsClearScreen16b
+    orr r0,r0,r0, LSL #16
+
+    ldr r1,gfxUtilsScreenAddr
+    ldr r2,gfxUtilsScreenSize
+    mov r2,r2, LSR #2
+    .gfxUtilsClearScreen16bLoop
+     str r0,[r1],#1
+     sub r2,r2,#1
+     cmp r2,#0
+     bne gfxUtilsClearScreen16bLoop
+   mov r15,r14
+]
+=0
+
+REM gfxUtils16m - 16m colors mode related routines
+DEF FNgfxUtils16m
+[ OPT bassPass%
+  ; slow clear screen for 16M colors screen mode
+  ; r0 = color (RGB888)
+  ; r0, r1, r2 = modified
+  .gfxUtilsClearScreen16m
+    ldr r1,gfxUtilsScreenAddr
+    ldr r2,gfxUtilsScreenSize
+    .gfxUtilsClearScreen16mLoop
+     str r0,[r1],#1
+     sub r2,r2,#1
+     cmp r2,#0
+     bne gfxUtilsClearScreen16mLoop
+   mov r15,r14
+]
+=0

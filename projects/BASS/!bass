@@ -1,0 +1,387 @@
+bassSourcesFile%=0:bassDataDefFile%=0:bassDataFile%=0
+
+ON ERROR PROConError:END
+
+REM ======= READ SYSTEM VARIABLES =======
+bassOrg%=EVAL("&"+FNreadSysVar("BassOrg","8000"))
+bassAsmOptSecondPass%=VAL(FNreadSysVar("BassPassOpt","14"))
+bassBinReservedMemory%=VAL(FNreadSysVar("BassBinaryBufferSize","128000"))
+bassMaxSources%=VAL(FNreadSysVar("BassMaxSources","256"))
+bassMaxData%=VAL(FNreadSysVar("BassMaxData","256")) * 2 + 1
+bassNoSugar%=VAL(FNreadSysVar("BassNoSugar","0"))
+bassDataFirst%=VAL(FNreadSysVar("BassDataFirst","0"))
+
+REM ======= ASSEMBLER CONFIG =======
+REM configure binary output filename
+bassOut$="@.bin.bin"
+REM start location
+bassOrg%=bassOrg%
+
+REM configure assembly pass (OPT directive)
+bassAsmOptSecondPass%=bassAsmOptSecondPass%
+
+REM configure reserved memory for the assembly code
+bassBinReservedMemory%=bassBinReservedMemory%
+
+REM ======= LIBRARIES =======
+DIM bassLibs$(bassMaxSources%)
+PROCloadSourcesFile("@.sources")
+
+REM ======= DATA =======
+DIM bassData$(bassMaxData%)
+DIM bassDataMetadata%(bassMaxData%)
+DIM bassDataAddr%(bassMaxData%)
+FOR bassI%=0 TO bassMaxData% STEP 2
+ bassDataAddr%(bassI%) = -1
+NEXT bassI%
+
+PROCloadDataFile("@.datadef")
+
+DIM bassBinStartAddr% bassBinReservedMemory%
+
+PRINT "assembly in progress..."
+
+REM ======= ASSEMBLER TWO PASS LOOP =======
+bassAsmOptFirstPass%=12
+bassAsmOptStep%=bassAsmOptSecondPass%-bassAsmOptFirstPass%
+FOR bassPass%=bassAsmOptFirstPass% TO bassAsmOptSecondPass% STEP bassAsmOptStep%
+ P%=bassOrg%
+ O%=bassBinStartAddr%
+ L%=O%+bassBinReservedMemory%
+
+ IF bassDataFirst% = 1 THEN
+  [ OPT bassPass%:b bassEntryPoint:]
+ ELSE
+  [ OPT bassPass%:.bassEntryPoint:]
+
+  REM ======= ASSEMBLE CODE PARTS =======
+   FOR bassI%=0 TO DIM(bassLibs$(),1)
+    IF bassLibs$(bassI%)<>"" THEN
+     bassUnused%=FNpartsEval(bassLibs$(bassI%))
+    ENDIF
+   NEXT bassI%
+  REM =
+ ENDIF
+
+ REM ======= ASSEMBLE DATA PARTS =======
+ bassDataAddrIndex%=0
+ FOR bassI%=0 TO DIM(bassData$(),1) STEP 2
+  IF (bassData$(bassI%)<>"" AND bassData$(bassI%+1)<>"") OR (bassData$(bassI%)<>"" AND bassDataMetadata%(bassI%)=0) THEN
+   bassLabel$ = bassData$(bassI%)
+
+ REM = initialize labels address
+   bassDataAddr%(bassDataAddrIndex%)=bassI%
+   bassDataAddr%(bassDataAddrIndex%+1)=P%
+
+   PROC_LET(bassLabel$, P%)
+   PROC_LET(bassLabel$+"_bass", bassBinStartAddr%+(P%-bassOrg%))
+ REM = reserve data from data size metadata info
+   P%+=bassDataMetadata%(bassI% + 1)
+   O%+=bassDataMetadata%(bassI% + 1)
+   [ OPT bassPass%:ALIGN:]
+
+   bassDataAddrIndex%+=2
+  ENDIF
+ NEXT bassI%
+ REM =
+
+ FOR bassI%=0 TO DIM(bassDataAddr%(),1) STEP 2
+  IF bassDataAddr%(bassI%)<>-1 THEN
+   bassLabel$ = bassData$(bassDataAddr%(bassI%))
+   bassDataSize% = bassDataMetadata%(bassDataAddr%(bassI%) + 1)
+   bassLabelAddr% = bassDataAddr%(bassI%+1)
+
+  REM = add some easy routines to get data addr / size in r0
+   IF bassNoSugar%=0 THEN
+    [ OPT bassPass%:dcd bassLabelAddr%:]
+    PROC_LET("get"+bassLabel$+"Addr", P%)
+    [ OPT bassPass%:sub r0,r15,#12:ldr r0,[r0]:mov r15,r14:]
+    [ OPT bassPass%:dcd bassDataSize%:]
+    PROC_LET("get"+bassLabel$+"Size", P%)
+    [ OPT bassPass%:sub r0,r15,#12:ldr r0,[r0]:mov r15,r14:]
+   ENDIF
+  ENDIF
+ NEXT bassI%
+
+ IF bassDataFirst% = 1 THEN
+  [ OPT bassPass%:.bassEntryPoint:]
+  REM ======= ASSEMBLE CODE PARTS =======
+   FOR bassI%=0 TO DIM(bassLibs$(),1)
+    IF bassLibs$(bassI%)<>"" THEN
+      bassUnused%=FNpartsEval(bassLibs$(bassI%))
+    ENDIF
+   NEXT bassI%
+  REM =
+ ENDIF
+NEXT bassPass%
+
+REM ======= COPY BINARY DATA =======
+FOR i%=0 TO DIM(bassData$(),1) STEP 2
+ IF bassData$(i%)<>"" AND bassData$(i%+1)<>"" AND bassDataMetadata%(i%)=1 THEN
+  label$ = bassData$(i%)
+  filepath$ = bassData$(i%+1)
+ REM = copy data
+  filename$=FNgetFilename(filepath$)
+  filepath$=FNgetPath(filepath$)+"."
+
+  SYS "OS_File",12,filename$,EVAL(label$+"_bass"),0,filepath$,0
+ ENDIF
+NEXT i%
+
+REM ======= BINARY OUTPUT =======
+bassBinLength%=bassBinStartAddr%+(P%-bassOrg%)
+SYS "OS_File",10,bassOut$,&FF8,,bassBinStartAddr%,bassBinLength%
+
+PRINT "Done. ("bassOut$+") "+STR$(bassBinLength%-bassBinStartAddr%)+" bytes"
+
+END
+
+REM ======= ERRORS HANDLER =======
+DEF PROConError
+ ON ERROR OFF
+ PRINT REPORT$;" at line ";ERL REM DIV 10
+ REM = close known file handles to avoid file locks
+ IF bassSourcesFile% <> 0 THEN:CLOSE#bassSourcesFile%:bassSourcesFile%=0:ENDIF
+ IF bassDataDefFile% <> 0 THEN:CLOSE#bassDataDefFile:bassDataDefFile%=0:ENDIF
+ IF bassDataFile% <> 0 THEN:CLOSE#bassDataFile%:bassDataFile%=0:ENDIF
+ END
+ENDPROC
+
+REM ======= CALL EACH FUNCTIONS OF A LIST OF FUNCTIONS NAME =======
+DEF FNpartsEval(bassParts$)
+ LOCAL bassPart$
+ bassPartPos% = INSTR(bassParts$,":")
+ IF bassPartPos%<>0 THEN
+  bassPart$=LEFT$(bassParts$,bassPartPos%-1)
+  bassUnused%=FNpartsEval(RIGHT$(bassParts$,LEN(bassParts$)-bassPartPos%))
+  bassUnused%=EVAL("FN"+bassPart$)
+ ELSE
+  bassUnused%=EVAL("FN"+bassParts$)
+ ENDIF
+=0
+
+REM ======= GET SYSTEM VARIABLE VALUE =======
+DEF FNreadSysVar(varname$,default$)
+ DIM varval% 256
+ SYS "XOS_ReadVarVal",varname$,0,-1,0,3 TO ,,exist%
+ IF exist%=0 THEN
+  IF LEN(default$) > 0 THEN
+   FOR i%=1 TO LEN(default$)
+    varval%?(i%-1)=ASC(MID$(default$, i%, 1))
+   NEXT i%
+  ELSE
+   varval%?(0)=13
+  ENDIF
+ ELSE
+  SYS "OS_ReadVarVal",varname$,varval%,256,,3 TO ,,newname%
+  varval%?(newname%)=13
+ ENDIF
+=$varval%
+
+REM ======= LOAD/PARSE SOURCES FILE =======
+DEF PROCloadSourcesFile(sourcesPath$)
+ bassSourcesFile%=OPENIN sourcesPath$
+ IF bassSourcesFile%=0 THEN
+  ERROR 214,"""sources"" file does not exist"
+ ENDIF
+ LOCAL index%:index%=0
+ LOCAL line%:line%=0
+ LOCAL file$
+ LOCAL filepath$
+ LOCAL filename$
+ LOCAL modulePos%
+ LOCAL namespaces%
+ REPEAT
+  file$=GET$#bassSourcesFile%
+  IF LEFT$(file$,1) <> ";" THEN
+   IF LEFT$(file$,1) <> "$" THEN
+     filepath$="@."+file$
+   ELSE
+     filepath$=file$
+   ENDIF
+
+   REM detect if there is a list of functions attached to this source
+   modulePos% = INSTR(filepath$,":")
+   IF modulePos%<>0 THEN
+    filepath$=LEFT$(filepath$,LEN(filepath$)-1)
+   ENDIF
+
+   LIBRARY filepath$
+
+   IF modulePos%<>0 THEN
+    REM store the list of functions
+    bassLibs$(index%)=GET$#bassSourcesFile%
+    line%+=1
+    index%+=1
+   ELSE
+    REM get function name from filename
+    filename$=FNgetFilename(filepath$)
+
+    IF LEN(filename$) >= 0 THEN
+     bassLibs$(index%)=filename$
+     index%+=1
+    ELSE
+     PRINT "invalid sources entry at line"+STR$(line%)
+    ENDIF
+   ENDIF
+  ENDIF
+  line%+=1
+ UNTIL EOF#bassSourcesFile%
+ CLOSE#bassSourcesFile%:bassSourcesFile% = 0
+ENDPROC
+
+REM ======= LOAD/PARSE DATA FILE =======
+DEF PROCloadDataFile(dataPath$)
+ bassDataDefFile%=OPENIN dataPath$
+ IF bassDataDefFile%=0 THEN
+  ERROR 214,"""data"" file does not exist"
+ ENDIF
+ LOCAL index%:index%=0
+ LOCAL meta_index%:meta_index%=0
+ LOCAL line%:line%=0
+ LOCAL label$
+ LOCAL file$
+ LOCAL filename$
+ LOCAL data_size_str$
+ LOCAL data_size%
+ LOCAL allocateTagPos%
+ REPEAT
+  label$=GET$#bassDataDefFile%
+  IF LEFT$(label$,1) <> ";" THEN
+   allocateTagPos% = INSTR(label$,":")
+   IF allocateTagPos%<>0 THEN
+ REM = allocation
+    bassData$(index%)=LEFT$(label$,allocateTagPos%-1)
+    index%+=1
+    bassData$(index%)=""
+    index%+=1
+
+    data_size_str$=RIGHT$(label$,LEN(label$)-allocateTagPos%)
+    bassDataMetadata%(meta_index%)=0
+    meta_index%+=1
+    bassDataMetadata%(meta_index%)=VAL(data_size_str$)
+    meta_index%+=1
+   ELSE
+ REM = external binary data to include
+    file$=GET$#bassDataDefFile%
+    filename$="@."+file$
+
+    bassData$(index%)=label$
+    index%+=1
+    bassData$(index%)=filename$
+    index%+=1
+ REM = get file size
+    bassDataFile%=OPENIN filename$
+    IF bassDataFile%=0 THEN
+     ERROR 214,""""+filename$+""" file does not exist"
+     CLOSE#bassDataDefFile%:bassDataDefFile%=0
+    ENDIF
+    data_size% = EXT#bassDataFile%
+    CLOSE#bassDataFile%:bassDataFile%=0
+
+    bassDataMetadata%(meta_index%)=1
+    meta_index%+=1
+    bassDataMetadata%(meta_index%)=data_size%
+    meta_index%+=1
+   ENDIF
+  ENDIF
+  line%+=1
+ UNTIL EOF#bassDataDefFile%
+ CLOSE#bassDataDefFile%:bassDataDefFile% = 0
+ENDPROC
+
+REM ======= ASSIGN VARIABLE DYNAMICALLY =======
+DEF PROC_LET(a$,b%)
+ unused = EVAL("FN_LET(" + a$ + ")")
+ENDPROC
+DEF FN_LET(RETURN a):a=b%:=TRUE
+
+REM ======= GET FILENAME FROM FULLPATH =======
+DEF FNgetFilename(filepath$)
+ LOCAL curr_offset%
+ LOCAL offset%
+ LOCAL filename$
+ offset%=0
+ curr_offset%=0
+ filename$=filepath$
+ REPEAT
+  offset%=curr_offset%
+  filename$=RIGHT$(filename$,LEN(filename$)-offset%)
+  curr_offset%=INSTR(filename$,".")
+ UNTIL curr_offset%=0
+ IF offset%=0 THEN
+  filename$=""
+ ENDIF
+=filename$
+
+REM ======= GET PATH FROM FULLPATH (without filename nor last .) =======
+DEF FNgetPath(filepath$)
+ LOCAL filename$
+ filename$=FNgetFilename(filepath$)
+ LOCAL path$
+ path$=LEFT$(filepath$,LEN(filepath$)-LEN(filename$)-1)
+=path$
+
+REM ====== ASM: ALIGN SO THAT NEXT INSTRUCTION
+REM ======      START ON SECOND WORD OF QWORD BOUNDARY (faster)
+REM ====== typically used before N cycles instructions
+DEF PROCqAlign4(log%)
+LOCAL pos%
+pos%=P% AND 15
+IF pos%<>4 THEN
+ CASE pos% OF
+  WHEN 0: [ OPT bassPass%:mov r0,r0:]
+  WHEN 8: [ OPT bassPass%:mov r0,r0:mov r0,r0:mov r0,r0:]
+  WHEN 12: [ OPT bassPass%:mov r0,r0:mov r0,r0:]
+ ENDCASE
+ IF log% THEN
+  PRINT STR$(P%)+" align 4 (case "+STR$(pos%)+")"
+ ENDIF
+ENDIF
+ENDPROC
+
+REM = these Align on different +N qword boundary
+DEF PROCqAlign8(log%)
+LOCAL pos%
+pos%=P% AND 15
+IF pos%<>8 THEN
+ CASE pos% OF
+  WHEN 0: [ OPT bassPass%:mov r0,r0:mov r0,r0:]
+  WHEN 4: [ OPT bassPass%:mov r0,r0:]
+  WHEN 12: [ OPT bassPass%:mov r0,r0:mov r0,r0:mov r0,r0:]
+ ENDCASE
+ IF log% THEN
+  PRINT STR$(P%)+" align 8 (case "+STR$(pos%)+")"
+ ENDIF
+ENDIF
+ENDPROC
+
+DEF PROCqAlign12(log%)
+LOCAL pos%
+pos%=P% AND 15
+IF pos%<>12 THEN
+ CASE pos% OF
+  WHEN 0: [ OPT bassPass%:mov r0,r0:mov r0,r0:mov r0,r0:]
+  WHEN 4: [ OPT bassPass%:mov r0,r0:mov r0,r0:]
+  WHEN 8: [ OPT bassPass%:mov r0,r0:]
+ ENDCASE
+ IF log% THEN
+  PRINT STR$(P%)+" align 12 (case "+STR$(pos%)+")"
+ ENDIF
+ENDIF
+ENDPROC
+
+DEF PROCqAlign0(log%)
+LOCAL pos%
+pos%=P% AND 15
+IF pos%<>0 THEN
+ CASE pos% OF
+  WHEN 4: [ OPT bassPass%:mov r0,r0:mov r0,r0:mov r0,r0:]
+  WHEN 8: [ OPT bassPass%:mov r0,r0:mov r0,r0:]
+  WHEN 12: [ OPT bassPass%:mov r0,r0:]
+ ENDCASE
+ IF log% THEN
+  PRINT STR$(P%)+" align 0 (case "+STR$(pos%)+")"
+ ENDIF
+ENDIF
+ENDPROC

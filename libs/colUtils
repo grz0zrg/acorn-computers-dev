@@ -1,0 +1,113 @@
+REM colUtils - Colors utilities
+DEF FNcolUtils
+[ OPT bassPass%
+
+]
+=0
+
+REM colUtils256 - 256 colors mode related routines
+DEF FNcolUtils256
+[ OPT bassPass%
+
+; show current 256 colors palette as a 16x16 matrix
+; no stack, fairly fast by doing 2 16x16 blocks per loop
+; can go faster with a stack / optimizing addressing / loop
+.colUtilsPal256Show
+ ; get screen width in r13
+ mvn r0,#0 ; -1, current mode
+ mov r1,#11
+ swi "OS_ReadModeVariable"
+ add r13,r2,#1
+ ;
+ ldr r0,gfxUtilsScreenAddr
+ mov r1,#127 ; loop index
+ ; prepare r4 for 0x01010101 (the decrement value for color index)
+ mov r4,#1
+ orr r4,r4,r4, LSL #8
+ orr r4,r4,r4, LSL #16
+ ; prepare r9 for 0xffffffff (color index for a 16px line)
+ mov r9,#255
+ orr r9,r9,r9, LSL #8
+ orr r9,r9,r9, LSL #16
+ .colUtilsPal256ShowLoop
+  and r2,r1,#7 ; x = i % 8
+  mov r2,r2, LSL #5 ; x = x * 32
+  mov r3,r1, LSR #3 ; y = i / 8
+  mov r3,r3, LSL #4 ; y = y * 16
+
+  ; addr = addr + x + y * 320 (fast)
+;  add r2,r2,r3, LSL #8
+;  add r2,r2,r3, LSL #6
+;  add r2,r0,r2
+  ; slower
+  mul r6,r3,r13
+  add r2,r2,r6
+  add r2,r0,r2
+
+  ; prepare data line for first 16x block
+  sub r5,r9,r4
+  mov r6,r5
+  mov r7,r5
+  mov r8,r5
+
+  ; prepare data line for second 16x block
+  mov r10,r9
+  mov r11,r9
+  mov r12,r9
+]
+FOR l%=0 TO 14
+[ OPT bassPass%
+  ; copy each lines (32 pixels)
+  stmia r2, {r5-r12}
+  ; add screen line width to go to the one below
+  add r2,r2,r13
+]
+NEXT l%
+[ OPT bassPass%
+  stmia r2, {r5-r12}
+
+  ; decrement color index
+  sub r9,r5,r4
+
+  subs r1,r1,#1
+ bpl colUtilsPal256ShowLoop
+ mov r15,r14
+
+]
+=0
+
+REM colUtils16b - 16 bit colors mode related routines
+DEF FNcolUtils16b
+[ OPT bassPass%
+ ; pack individual RGB565 components as a single RGB565 value
+ ;  in r0 = R
+ ;     r1 = G
+ ;     r2 = B
+ ; out r0 = RGB565 value
+ ; r0,r1,r2,r3 = modified
+ .colUtils16bPack
+  mov r0,r0,LSL #11
+  mov r1,r1,LSL #5
+  orr r0,r0,r1
+  orr r0,r0,r2
+ mov r15,r14
+]
+=0
+
+REM colUtils16m - 16m colors mode related routines
+DEF FNcolUtils16m
+[ OPT bassPass%
+ ; pack individual RGB888 components as a single RGB888 value
+ ;  in r0 = R
+ ;     r1 = G
+ ;     r2 = B
+ ; out r0 = RGB888 value
+ ; r0,r1,r2,r3 = modified
+ .colUtils16mPack
+  mov r2,r2,LSL #16
+  mov r1,r1,LSL #8
+  orr r2,r2,r1
+  orr r0,r2,r0
+ mov r15,r14
+]
+=0

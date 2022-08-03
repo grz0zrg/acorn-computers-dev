@@ -1,5 +1,7 @@
 ; list of files to assemble (in order they are defined)
 src.main
+^.^.libs.colUtils:
+colUtils16m
 ^.^.libs.gfxUtils:
-gfxUtils:gfxUtils256
+gfxUtils:gfxUtils16m
 ^.^.libs.sysUtils

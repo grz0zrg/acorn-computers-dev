@@ -1,0 +1,18 @@
+| Set this as Obey filetype and run it to make the framework RISC OS ready.
+| It change framework files type to make them runnable on RISC OS.
+| It also tokenize BASIC files.
+| Pretty useful if the files come from another OS. (which is likely)
+
+dir <Obey$Dir>
+SetType @.untokeniz Obey
+SetType @.scripts.metapply BASIC
+Set bass$tokenize true
+Run @.scripts.metapply
+Set bass$tokenize false
+| Now run the generated Command script which tokenize all BASIC files.
+Echo "Tokenizing..."
+SetType @.scripts.tokenize Command
+SetType @.scripts.tokdel Command
+Filer_Run @.scripts.tokenize
+Filer_Run @.scripts.tokdel
+

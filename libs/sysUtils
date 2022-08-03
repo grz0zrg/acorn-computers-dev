@@ -1,0 +1,166 @@
+REM sysUtils
+DEF FNsysUtils
+[ OPT bassPass%
+
+; Write bytes to active output stream
+;  r0 = data pointer
+;  r1 = length
+; r0,r1 = modified
+.sysUtilsWriteB
+ mov r2,r0
+ .copy
+  ldrb r0,[r2],#1
+  swi "OS_WriteC"
+  subs r1,r1,#1
+  bne copy
+ mov r15,r14
+
+; Print a 32 bits value to active output stream
+;  r0 = value
+; r1,r2 = modified
+.sysUtilsPrintInteger
+ adr r1,vIntegerToPrint
+ mov r2,#12
+ swi "OS_ConvertInteger4"
+ swi "OS_WriteS"
+ .vIntegerToPrint
+  dcd 0
+  dcd 0
+  dcd 0
+ mov r15,r14
+
+; Print a 32 bits hex value to active output stream
+;  r0 = value
+; r1,r2 = modified
+.sysUtilsPrintHex
+ adr r1,vHexToPrint
+ mov r2,#12
+ swi "OS_ConvertHex8"
+ swi "OS_WriteS"
+ .vHexToPrint
+  dcd 0
+  dcd 0
+  dcd 0
+ mov r15,r14
+
+; check if a key is pressed
+; Z = 1 if pressed
+; r0 = keycode
+; r0,r1,r2 = modified
+.sysUtilsIsKeyPressed
+  eor r1,r0,#&FF
+  mov r0,#129
+  mov r2,#255
+  swi "OS_Byte"
+  cmp r1,#255 ; &FF if pressed 0 otherwise
+ mov r15,r14
+
+; check if escape key is pressed
+; Z = 1 if pressed
+; r0,r1,r2 = modified
+.sysUtilsIsEscapePressed
+  mov r0,#129
+  mov r1,#143 ; escape keycode
+  mov r2,#255
+  swi "OS_Byte"
+  cmp r1,#255 ; &FF if pressed 0 otherwise
+ mov r15,r14
+
+; start a simple centi-seconds timer
+; r0 = modified
+.sysUtilsStartTimer
+  swi "OS_ReadMonotonicTime"
+  str r0,sysUtilsTimerAddr
+  mov r15,r14
+
+.sysUtilsTimerAddr
+  dcd 0
+
+; stop timer
+; r0 = centisecond time
+; r0,r1 = modified
+.sysUtilsStopTimer
+  swi "OS_ReadMonotonicTime"
+  ldr r1,sysUtilsTimerAddr
+  sub r0,r0,r1
+  str r0,sysUtilsTimerAddr
+ mov r15,r14
+
+; initialize FPS timer
+; r0 = modified
+.sysUtilsInitFPSTimer
+ swi "OS_ReadMonotonicTime"
+ str r0,sysUtilsFPSTimer
+ mov r15,r14
+
+.sysUtilsFPSTimer
+ dcd 0
+.sysUtilsFPSFrame
+ dcd 0
+.sysUtilsFPS
+ dcd 0
+
+; compute FPS
+; r0,r1 = modified
+.sysUtilsComputeFPS
+ swi "OS_ReadMonotonicTime"
+ ldr r1,sysUtilsFPSTimer
+ sub r0,r0,r1
+ cmp r0,#100
+ ble sysUtilsFPSIncFrame
+   ldr r0,sysUtilsFPSFrame
+   str r0,sysUtilsFPS
+   mov r0,#0
+   str r0,sysUtilsFPSFrame
+   swi "OS_ReadMonotonicTime"
+   str r0,sysUtilsFPSTimer
+  mov r15,r14
+ .sysUtilsFPSIncFrame
+  ldr r0,sysUtilsFPSFrame
+  add r0,r0,#1
+  str r0,sysUtilsFPSFrame
+ mov r15,r14
+
+; print FPS
+; r0,r1,r2,r13 = modified
+.sysUtilsPrettyPrintFPS
+ swi "OS_WriteS"
+  equs "FPS: "
+  dcb 0
+  align
+.sysUtilsPrintFPS
+ ldr r0,sysUtilsFPS
+ mov r13,r14
+ bl sysUtilsPrintInteger
+ mov r15,r13
+
+; move cursor up/down a line
+; r0 = modified
+.sysUtilsCursorLineFeed
+ mov r0,#10
+ swi "OS_WriteC"
+ mov r15,r14
+
+; move cursor position to x,y
+; r0 = x
+; r1 = y
+; r0,r1,r2 = modified
+.sysUtilsMoveCursor
+ mov r2,r0
+ mov r0,#31
+ swi "OS_WriteC"
+ mov r0,r2
+ swi "OS_WriteC"
+ mov r0,r1
+ swi "OS_WriteC"
+ mov r15,r14
+
+; quit properly
+.sysUtilsExit
+ ldr r1,returnString
+ mov r2,#0
+ swi "OS_Exit"
+ .returnString
+  equs "ABEX"
+]
+=0

@@ -1,0 +1,25 @@
+REM mathUtils
+DEF FNmathUtils
+[ OPT bassPass%
+
+; Divide by 10
+;   in r0 = value to divide (and result)
+;  out r1 = r0 / 10
+;      r2 = r0 % 10
+;  r1,r2 = modified
+.mathUtilsDiv10
+  mov r1,r0,lsr#1
+  add r1,r1,r1,lsr#1
+  add r1,r1,r1,lsr#4
+  add r1,r1,r1,lsr#8
+  add r1,r1,r1,lsr#16
+  mov r1,r1,lsr#3
+  add r2,r1,r1,asl#2
+  sub r2,r0,r2,asl#1
+  cmp r2,#10
+  addge r1,r1,#1
+  ;subge r2,r2,#10 ; dont work ?
+ mov r15,r14
+
+]
+=0

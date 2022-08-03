@@ -1,0 +1,47 @@
+REM src.main
+REM main program
+DEF FNmain
+[ OPT bassPass%
+
+mov r3,#13 ; screen mode (320x256 256 colors)
+mov r4,#2 ; 2 screen banks
+mov r5,#0 ; background color of the screen banks
+mov r6,#0
+bl gfxUtilsVideoSetup
+bl sysUtilsInitFPSTimer
+
+.loop
+  ; wait vbl
+  mov r0,#19
+  swi "OS_Byte"
+
+  ; update screen address so it point to correct bank
+  bl gfxUtilsUpdateScreenAddr
+
+  ; clear screen
+  mov r0,#0
+  bl gfxUtilsClearScreen256
+
+  ; add some graphics code here
+
+  ; move cursor to home position
+  mov r0,#13
+  swi "OS_WriteC"
+
+  ; display fps
+  bl sysUtilsComputeFPS
+  bl sysUtilsPrintFPS
+
+  ; double buffering
+  ; we call this before VBL wait so there no tearing
+  ; on platforms with a GPU (like RPI)
+  bl gfxUtilsSwitchScreenBank
+
+  bl sysUtilsIsEscapePressed
+bne loop
+
+; exit cleanly
+bl sysUtilsExit
+
+]
+=0

@@ -1,0 +1,182 @@
+REM gfxUtilsUn - fast unrolled ARM2 graphics routines
+REM require gfxUtils
+DEF FNgfxUtilsUn
+=0
+REM clear portion of the screen
+REM   faster than ASM subroutine version, produce dense code
+REM   r0 = screen address (start pos.)
+REM   r1 = color, palette index
+REM   nbColors% = number of colors (2, 4, 16, 256)
+REM   bytesLength% = length in bytes
+DEF PROCgfxUtilsUnrollClearScreen(nbColors%, bytesLength%)
+ LOCAL blockLength%:LOCAL pixelsLeft%:LOCAL blocksLeft%:LOCAL endRegister%:LOCAL i%
+ CASE nbColors% OF
+  WHEN 2:
+   blockLength%=bytesLength% DIV 448
+   pixelsLeft%=bytesLength% MOD 448
+   blocksLeft%=pixelsLeft% DIV 32
+   pixelsLeft%=pixelsLeft% MOD 32
+   [ OPT bassPass%
+    orr r1,r1,r1, LSL #1
+    orr r1,r1,r1, LSL #2
+    orr r1,r1,r1, LSL #4
+    orr r1,r1,r1, LSL #8
+    orr r1,r1,r1, LSL #16 : ]
+  WHEN 4:
+   blockLength%=bytesLength% DIV 224
+   pixelsLeft%=bytesLength% MOD 224
+   blocksLeft%=pixelsLeft% DIV 16
+   pixelsLeft%=pixelsLeft% MOD 16
+   [ OPT bassPass%
+    orr r1,r1,r1, LSL #2
+    orr r1,r1,r1, LSL #4
+    orr r1,r1,r1, LSL #8
+    orr r1,r1,r1, LSL #16 : ]
+  WHEN 16:
+   blockLength%=bytesLength% DIV 112
+   pixelsLeft%=bytesLength% MOD 112
+   blocksLeft%=pixelsLeft% DIV 8
+   pixelsLeft%=pixelsLeft% MOD 8
+   [ OPT bassPass%
+    orr r1,r1,r1, LSL #4
+    orr r1,r1,r1, LSL #8
+    orr r1,r1,r1, LSL #16 : ]
+  WHEN 256:
+   blockLength%=bytesLength% DIV 56
+   pixelsLeft%=bytesLength% MOD 56
+   blocksLeft%=pixelsLeft% DIV 4
+   pixelsLeft%=pixelsLeft% MOD 4
+   [ OPT bassPass%
+    orr r1,r1,r1, LSL #8
+    orr r1,r1,r1, LSL #16 : ]
+   ENDIF
+ ENDCASE
+ IF blockLength% > 0 THEN
+  [ OPT bassPass%
+   mov r2,r1:mov r3,r1:mov r4,r1:mov r5,r1
+   mov r6,r1:mov r7,r1:mov r8,r1:mov r9,r1:mov r10,r1
+   mov r11,r1:mov r12,r1:mov r13,r1:mov r14,r1
+  ]
+ ELSE
+  IF blocksLeft% > 1 THEN
+   FOR i%=2 TO blocksLeft%
+    [ OPT bassPass%
+     mov i%,r1
+    ]
+   NEXT i%
+  ENDIF
+ ENDIF
+ i%=blockLength%
+ WHILE i% > 0
+  [ OPT bassPass%:stmia r0!,{r1-r14}:]
+  i%-=1
+ ENDWHILE
+ IF blocksLeft% <> 0 THEN
+  endRegister%=blocksLeft%
+  [ OPT bassPass%:stmia r0!,{r1-endRegister%}:]
+ ENDIF
+ IF pixelsLeft% <> 0 THEN
+  [ OPT bassPass%
+   ldr r2,[r0]
+  ]
+  CASE nbColors% OF
+   WHEN 2:
+    [ OPT bassPass%
+     mov r1,r1, LSR #(32-pixelsLeft%)
+     mvn r3,#1
+     and r2,r2,r3, LSL #pixelsLeft%
+     orr r1,r1,r2
+     str r1,[r0]
+    ]
+   WHEN 4:
+    [ OPT bassPass%
+     mov r1,r1, LSR #(16-pixelsLeft%)*2
+     mvn r3,#1
+     and r2,r2,r3, LSL #pixelsLeft%*2
+     orr r1,r1,r2
+     str r1,[r0]
+    ]
+   WHEN 16:
+    [ OPT bassPass%
+     mov r1,r1, LSR #(8-pixelsLeft%)*4
+     mvn r3,#1
+     and r2,r2,r3, LSL #pixelsLeft%*4
+     orr r1,r1,r2
+     str r1,[r0]
+    ]
+   WHEN 256:
+    [ OPT bassPass%
+     mov r1,r1, LSR #(4-pixelsLeft%)*8
+     mvn r3,#1
+     and r2,r2,r3, LSL #pixelsLeft%*8
+     orr r1,r1,r2
+     str r1,[r0]
+    ]
+  ENDCASE
+ ENDIF
+ENDPROC
+
+REM blit an image which is the width of the screen at arbitrary screen position
+REM   r0 = image data address
+REM   r1 = start screen address (start pos. must be word aligned)
+REM   imageLength% = image data length (bytes)
+DEF PROCgfxUtilsUnrollFullWidthImageDraw(imageLength%)
+ LOCAL blocksLength%:LOCAL pixelsLeft%:LOCAL blocksLeft%:LOCAL endRegister%:LOCAL i%
+ blocksLength%=imageLength% DIV 52
+ FOR i%=0 TO blocksLength%-1
+  [ OPT bassPass%
+   ldmia r0!,{r2-r14}
+   stmia r1!,{r2-r14}
+  ] : NEXT i%
+ pixelsLeft%=imageLength% MOD 52
+ blocksLeft%=pixelsLeft% DIV 4
+ IF blocksLeft% <> 0 THEN
+  endRegister%=1+blocksLeft%
+  [ OPT bassPass% : ldmia r0!,{r2-endRegister%} : stmia r1!,{r2-endRegister%} : ]
+ ENDIF
+ENDPROC
+
+REM = fast copy of an image with per line stepping (made for screen copy)
+REM   r0 = data address
+REM   length% = source length (bytes)
+REM   lineLength% = length of a line (bytes)
+REM   linesToSkip% = lines to skip (and thus copy)
+DEF PROCgfxUtilsUnrollStepCopy(length%,lineLength%,linesToSkip%)
+ LOCAL blocksLength%:LOCAL pixelsLeft%:LOCAL blocksLeft%:LOCAL endRegister%:LOCAL i%:LOCAL k%:LOCAL n%
+ blocksLength%=lineLength% DIV 40
+ [ OPT bassPass%
+  add r15,r15,#0
+  .blockLineLengthOffset
+   dcd lineLength%
+  ldr r13,blockLineLengthOffset
+  add r1,r0,#lineLength%
+ ]
+ FOR k%=0 TO (length%/lineLength%/(linesToSkip%+1))-1
+  [ OPT bassPass%
+   mov r12,r1
+  ]
+  FOR i%=0 TO blocksLength%-1
+   [ OPT bassPass%
+    ldmia r0!,{r2-r11}
+   ]
+   FOR n%=0 TO (linesToSkip%-1)
+    [ OPT bassPass%
+     stmia r1,{r2-r11}
+    ]
+    IF n% <> (linesToSkip%-1) THEN
+     [ OPT bassPass%:add r1,r1,r13:]
+    ENDIF
+   NEXT n%
+   IF i% <> (blocksLength%-1) THEN
+    [ OPT bassPass%
+     add r1,r12,#40
+     mov r12,r1
+    ]
+   ENDIF
+  NEXT i%
+  [ OPT bassPass%
+   add r0,r0,#lineLength%*linesToSkip%
+   add r1,r0,#lineLength%
+  ]
+ NEXT k%
+ENDPROC

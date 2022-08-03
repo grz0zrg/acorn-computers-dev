@@ -1,0 +1,8 @@
+REM src.main
+REM main program
+DEF FNmain
+[ OPT bassPass%
+; some asm code
+
+]
+=0
