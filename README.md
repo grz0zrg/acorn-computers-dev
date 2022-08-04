@@ -12,7 +12,9 @@ BBC BASIC files on this repository are untokenized, they are regular text files 
 
 The `metapply` file is an Obey script which is used to make the framework ready, you just have to run it once on RISC OS, it change files type automatically and tokenize all BBC BASIC files.
 
-The `untokeniz` file is an Obey script which untokenize all BBC BASIC files (recursively), useful to make them readable.
+The `untokeniz` file is an Obey script which untokenize all BBC BASIC files (recursively), useful to make them readable again.
+
+The `demos` directory is things i built for the Acorn computers, just copy the directory content to the `projects` directory if you want to try them, only have [DoxVox256](https://www.onirom.fr/wiki/blog/02-05-2022_Archimedes-ARM2-scaled-dots-landscape-fake-voxels-heightfield/) for now which is a 3D heightfield in mode 13 (320x256 256 colors) optimized for ARM2 CPU / early Acorn Archimedes, works on modern RISC OS but the mode may be not available for the monitor, so RISC OS will switch to the closest working mode (640x480 here) which may make the graphics a bit weird.
 
 ## Quickstart
 

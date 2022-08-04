@@ -1,0 +1,10 @@
+; list of files to assemble (assembled in order they are defined)
+src.main
+^.^.libs.sysUtils
+^.^.libs.mathUtils
+^.^.libs.gfxUtils:
+gfxUtils:gfxUtils256
+^.^.libs.un.gfxUtilsUn
+^.^.libs.memUtils
+^.^.libs.lz4Utils
+src.landscape

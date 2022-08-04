@@ -1,0 +1,64 @@
+REM main program
+DEF FNmain
+[ OPT bassPass%
+
+mov r3,#13 ; screen mode (320x256 256 colors)
+mov r4,#2 ; 2 screen banks
+mov r5,#0 ; back color of the screen banks
+mov r6,#0
+bl gfxUtilsVideoSetup
+bl sysUtilsInitFPSTimer
+
+bl setupLandscape
+
+; uncompress background
+bl getskyBackgroundAddr
+mov r1,r0
+bl getlz4SkyBackgroundAddr
+bl lz4UtilsUnlz
+
+; prepare screens by drawing the static background
+ldr r10,gfxUtilsScreenBankCount
+.setupBackground
+ bl gfxUtilsSwitchScreenBank
+ bl gfxUtilsUpdateScreenAddr
+
+ ; draw static background on all screen banks
+ bl gfxUtilsGetScreenAddr
+ mov r1,r0
+ bl getskyBackgroundSize
+ mov r2,r0,LSR #2
+ bl getskyBackgroundAddr
+ bl memUtilsCopyWords
+ sub r10,r10,#1
+ cmp r10,#0
+bne setupBackground
+
+.loop
+  ; wait vbl
+  mov r0,#19
+  swi "OS_Byte"
+
+  ; double buffering
+  bl gfxUtilsSwitchScreenBank
+
+  ; update screen address so it point to correct bank
+  bl gfxUtilsUpdateScreenAddr
+
+  bl drawLandscape
+  bl copyLandscapeLines
+
+  ; move cursor to home position
+  mov r0,#13
+  swi "OS_WriteC"
+
+  bl sysUtilsComputeFPS
+  bl sysUtilsPrintFPS
+
+  bl sysUtilsIsEscapePressed
+bne loop
+
+; back to OS
+bl sysUtilsExit
+]
+=0

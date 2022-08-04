@@ -1,0 +1,29 @@
+| BASS compile script template
+| ======================
+| === PROJECT CONFIG ===
+| ======================
+| sources / data limit
+Set BassMaxSources 256
+Set BassMaxData 256
+| useful routines will be generated for each defined data
+Set BassNoSugar 0
+| code will be above data in the generated binary
+Set BassDataFirst 0
+| memory space for the generated code (in bytes)
+| increase if you have an "assembler limit" error
+Set BassBinaryBufferSize 2000000
+| 14 to turn off asm output (15 to turn on)
+Set BassPassOpt 14
+| program execution address, typically 8000
+Set BassOrg 8000
+| BBC BASIC free memory
+WimpSlot -min 4096k -max 4096k
+| ===============
+| === MISC ===
+| ===============
+dir <Obey$Dir>
+Filer_Run @.tokenize
+| ===============
+| === COMPILE ===
+| ===============
+TaskWindow ^.BASS.!bass -wimpslot 8192K -display -quit

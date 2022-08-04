@@ -1,0 +1,5 @@
+BASIC
+TEXTLOAD "data.landscape.landConf"
+SAVE "data.landscape.landConf"
+QUIT
+

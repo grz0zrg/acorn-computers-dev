@@ -1,0 +1,509 @@
+REM Heightfield landscape
+REM by grz aka Julien Verneuil - 2022
+REM =====================
+REM This is a pseudo 3d dots heightfield where dots are positioned as a grid
+REM The dots are then elevated according to a map (pointY-heightmapY)
+REM The dots are then rendered as 16xN rectangles, data are generated with external p5js tools
+REM
+REM It rely on a set of pre-computed data:
+REM   * points position: a list of x/y coords which represent points position on the 320x256 screen, the points are adjusted on a plane and are ordered by depth (farthest points are first)
+REM   * points u/v: contain heightmap/colormap initial data index for points
+REM   * heightmap (NxN): height data (a byte)
+REM   * colormap (NxN): color data (256 colors palette index)
+REM
+REM Rather heavy on the data side due to being encoded as a word for most values so they can be loaded into registers in one go without realtime processing requirements
+REM There is also some duplicate data for optimizations, amount of data can be reduced by reducing map size, using compression, going into 16 colors mode (or other modes), scrolling could also be done without duplicate maps data.
+REM
+REM Tricks to make it fast:
+REM   * points x/y u/v (map address) data are interleaved
+REM   * maps data (height, color) are interleaved
+REM   * maps data are duplicated as an optimization for scrolling (scrolling is then done with a single instruction for each points)
+REM   * render 3 points at once, this is why x/y/u/v data are interleaved so we get the 3 points data in two instructions (one for x/y, one for map u/v address)
+REM   * render loop is unrolled
+REM   * points are culled and clipped when they get outside the bottom part of the screen
+REM   * screen address is added to points x/y in a preprocessing step (1 cycle saved) for each screen bank, this require duplicate data
+REM   * map data address is added to points u/v address in a preprocessing step (1 cycle saved)
+REM   * the rectangle rendering code will skip scanlines if a height step is given, the skipped scanlines are then filled with a copy of the line drawn previously
+REM     this roughly multiply the performances by a factor of two or more at the expense of looking very blocky on high stepping (2 is ok)
+REM
+REM Performances: More than 900 16x11 rectangles (skipping every two scanlines) at 50 fps on ARM 2 8mhz Acorn Archimedes with bitmap background
+REM
+REM Tweaks to improve performances:
+REM   * Reducing the amount of points (or block width/height) is critical for performances
+REM   * Offseting down the whole landscape so that more points get culled works
+REN   * Skip more lines
+REM   * Screen address could be aligned ? to save some cycles with the disadvantage of looking more blocky, map address could be also aligned ? to gain some cycles at the expense of more data
+REM   * Going for processing 4 points at once could also work
+REM   * Height could be precomputed, would gain some more cycles
+
+REM = generate landscape drawing code (loop unroll)
+DEF PROClandscapeUnroll(paramNbPoints%,paramBlockHeight%,paramBlockStep%,paramScreenWidth%)
+
+LOCAL registersMap%()
+LOCAL mapAddrRegister%
+LOCAL outAddrRegister%
+LOCAL blockSkipJumpAmount%
+LOCAL i%:LOCAL l%:LOCAL k%:LOCAL j%
+
+REM = registers map for code generation
+DIM registersMap%(5)
+registersMap%(0)=3:registersMap%(1)=2
+registersMap%(2)=5:registersMap%(3)=4
+registersMap%(4)=7:registersMap%(5)=6
+
+paramNbPoints%=paramNbPoints%/3
+
+FOR i%=0 TO paramNbPoints%-1
+ [ OPT bassPass%
+  ; load points layout data (3x point screen address / map address)
+  ldmia r0!, {r2-r7}
+ ]
+
+ REM = draw 3 points/squares
+ FOR l%=0 TO 5 STEP 2
+  blockType% = clipData%(i% * 3 + l% DIV 2)
+
+  REM = jump amount to skip standard block draw
+  blockSkipJumpAmount% = (INT(paramBlockHeight% / paramBlockStep% + 0.5)*8+(12-(blockType%*4)))-4
+
+  mapAddrRegister%=registersMap%(l%)
+  outAddrRegister%=registersMap%(l%+1)
+  [ OPT bassPass%
+   ; compute map address with scroll
+   add mapAddrRegister%,mapAddrRegister%,r9
+
+   ; load height/color data
+   ldmia mapAddrRegister%,{r10-r11}
+   ; height / elevate
+   sub outAddrRegister%,outAddrRegister%,r10
+
+   ; cull / clip part, will skip / clip rectangle if overflowing
+   cmp outAddrRegister%,r1
+
+   ; jump to standard block draw call if not overflowing
+   addlt r15,r15,#12;+(paramBlockHeight%*8+(12-(blockType%*4)))-4-4
+
+   ; at this point it is overflowing at the bottom
+
+   ; check if clipping is needed
+   cmp outAddrRegister%,r8
+   ; skip if not
+   addge r15,r15,#8+blockSkipJumpAmount%-4
+  ]
+
+  CASE outAddrRegister% OF
+   WHEN 2
+    CASE blockType% OF
+     WHEN 0:[ OPT bassPass%:bl clipDraw02:]
+     WHEN 1:[ OPT bassPass%:bl clipDraw12:]
+     WHEN 2:[ OPT bassPass%:bl clipDraw22:]
+     WHEN 3:[ OPT bassPass%:bl clipDraw32:]
+    ENDCASE
+   WHEN 4
+    CASE blockType% OF
+     WHEN 0:[ OPT bassPass%:bl clipDraw04:]
+     WHEN 1:[ OPT bassPass%:bl clipDraw14:]
+     WHEN 2:[ OPT bassPass%:bl clipDraw24:]
+     WHEN 3:[ OPT bassPass%:bl clipDraw34:]
+    ENDCASE
+   WHEN 6
+    CASE blockType% OF
+     WHEN 0:[ OPT bassPass%:bl clipDraw06:]
+     WHEN 1:[ OPT bassPass%:bl clipDraw16:]
+     WHEN 2:[ OPT bassPass%:bl clipDraw26:]
+     WHEN 3:[ OPT bassPass%:bl clipDraw36:]
+    ENDCASE
+  ENDCASE
+
+  [ OPT bassPass%
+   ; go to next point
+   add r15,r15,#blockSkipJumpAmount%-4
+  ]
+
+  REM = standard block draw (4px,8px,12px,16px width * blockHeight)
+  CASE blockType% OF
+   WHEN 0:[ OPT bassPass%:mov r12,r11:mov r13,r11:mov r14,r11:]
+   WHEN 1:[ OPT bassPass%:mov r12,r11:mov r13,r11:]
+   WHEN 2:[ OPT bassPass%:mov r12,r11:]
+  ENDCASE
+  REM = draw j%xH blocks
+  FOR k%=0 TO paramBlockHeight%-1 STEP paramBlockStep%
+   CASE blockType% OF
+    WHEN 0:[ OPT bassPass%:stmia outAddrRegister%,{r11-r14}:]
+    WHEN 1:[ OPT bassPass%:stmia outAddrRegister%,{r11-r13}:]
+    WHEN 2:[ OPT bassPass%:stmia outAddrRegister%,{r11-r12}:]
+    WHEN 3:[ OPT bassPass%:str r11,[outAddrRegister%]:]
+   ENDCASE
+   IF (k% + paramBlockStep%) < paramBlockHeight% THEN
+    [ OPT bassPass%:add outAddrRegister%,outAddrRegister%,#paramScreenWidth%*paramBlockStep%:]
+   ENDIF
+  NEXT k%
+ NEXT l%
+NEXT i%
+
+[ OPT bassPass%
+ ldr r14,landscapeReturnAddrAddr
+ ldr r14,[r14]
+ mov r15,r14
+
+ .landscapeReturnAddrAddr
+  dcd landscapeReturnAddr
+]
+[ OPT bassPass%:.clipDraw02:]
+PROCclipDraw(0,2,paramScreenWidth%,paramBlockStep%,paramBlockHeight%)
+[ OPT bassPass%:.clipDraw12:]
+PROCclipDraw(1,2,paramScreenWidth%,paramBlockStep%,paramBlockHeight%)
+[ OPT bassPass%:.clipDraw22:]
+PROCclipDraw(2,2,paramScreenWidth%,paramBlockStep%,paramBlockHeight%)
+[ OPT bassPass%:.clipDraw32:]
+PROCclipDraw(3,2,paramScreenWidth%,paramBlockStep%,paramBlockHeight%)
+[ OPT bassPass%:.clipDraw04:]
+PROCclipDraw(0,4,paramScreenWidth%,paramBlockStep%,paramBlockHeight%)
+[ OPT bassPass%:.clipDraw14:]
+PROCclipDraw(1,4,paramScreenWidth%,paramBlockStep%,paramBlockHeight%)
+[ OPT bassPass%:.clipDraw24:]
+PROCclipDraw(2,4,paramScreenWidth%,paramBlockStep%,paramBlockHeight%)
+[ OPT bassPass%:.clipDraw34:]
+PROCclipDraw(3,4,paramScreenWidth%,paramBlockStep%,paramBlockHeight%)
+[ OPT bassPass%:.clipDraw06:]
+PROCclipDraw(0,6,paramScreenWidth%,paramBlockStep%,paramBlockHeight%)
+[ OPT bassPass%:.clipDraw16:]
+PROCclipDraw(1,6,paramScreenWidth%,paramBlockStep%,paramBlockHeight%)
+[ OPT bassPass%:.clipDraw26:]
+PROCclipDraw(2,6,paramScreenWidth%,paramBlockStep%,paramBlockHeight%)
+[ OPT bassPass%:.clipDraw36:]
+PROCclipDraw(3,6,paramScreenWidth%,paramBlockStep%,paramBlockHeight%)
+ENDPROC
+
+REM = draw a block with clipping
+DEF PROCclipDraw(type%,dstAddrRegister%,paramScreenWidth%,paramBlockStep%,paramBlockHeight%)
+  REM = block draw with clipping
+  CASE type% OF
+   WHEN 0:[ OPT bassPass%:mov r12,r11:mov r13,r11:mov r10,r11:]
+   WHEN 1:[ OPT bassPass%:mov r12,r11:mov r13,r11:]
+   WHEN 2:[ OPT bassPass%:mov r12,r11:]
+  ENDCASE
+  REM = draw j%xH blocks
+  FOR k%=0 TO paramBlockHeight%-1 STEP paramBlockStep%
+   CASE type% OF
+    WHEN 0:[ OPT bassPass%:stmia dstAddrRegister%,{r11-r10}:]
+    WHEN 1:[ OPT bassPass%:stmia dstAddrRegister%,{r11-r13}:]
+    WHEN 2:[ OPT bassPass%:stmia dstAddrRegister%,{r11-r12}:]
+    WHEN 3:[ OPT bassPass%:str r11,[dstAddrRegister%]:]
+   ENDCASE
+   IF (k% + paramBlockStep%) < paramBlockHeight% THEN
+    [ OPT bassPass%
+     add dstAddrRegister%,dstAddrRegister%,#paramScreenWidth%*paramBlockStep%
+     ; clip
+     cmp dstAddrRegister%,r8
+     movge r15,r14
+    ]
+   ENDIF
+  NEXT k%
+ [ OPT bassPass%:mov r15,r14:]
+ENDPROC
+
+REM = voxels/dots landscape
+DEF FNlandscape
+ REM = CLIP DATA DEFINITION AND PARAMS FROM EXTERNAL TOOL
+ LIBRARY "@.data.landscape.landConf"
+ PROCinitializeLandConf
+ PROCinitializeClipData
+
+ REM = LANDSCAPE PARAMETERS
+ LOCAL blockHeight%:LOCAL blockStep%:LOCAL points%:LOCAL screenWidth%
+ LOCAL landscapeMapWidth%:LOCAL landscapeMapHeight%:LOCAL landscapeDataSize%
+ REM general parameters
+  screenWidth%=320
+ REM points/blocks parameters
+  blockHeight%=landConfBlockHeight%
+  blockStep%=landConfBlockStep%
+  points%=landConfPoints%
+ REM colormap/heightmap width/height and data size in bytes
+  landscapeMapWidth%=landConfMapWidth%
+  landscapeMapHeight%=landConfMapHeight%
+  landscapeMapDataSize%=landConfMapDataSize%
+ REM =
+
+[ OPT bassPass%
+.landscapePointsAddrBa
+ dcd landscapePointsDataA
+.landscapePointsAddrBb
+ dcd landscapePointsDataB
+.landscapeDataAAddr
+ dcd landscapeDataA
+.landscapeDataBAddr
+ dcd landscapeDataB
+.landscapeDataSize
+ dcd landConfMapWidth%*landConfMapHeight%*landConfMapDataSize%
+.landscapePointsCount
+ dcd points%
+.landscapeMapDataFilename
+ equs "map"
+ dcd 0
+.landscapeMapDataFilepath
+ equs "@.data.landscape."
+ dcd 0
+; for compressed map data
+;.landscapeLz4MapAddr
+; dcd lz4mapData
+
+
+; INITIALIZE
+; prepare landscape points data for each screen bank
+; this add the screen address to points data for each screen bank
+; which save some "add" in the loop (at the price of duplicate data)
+; it also add map data address for each points u/v address
+.setupLandscape
+ str r14,landscapeReturnAddr
+
+ ; in case map is lz4 compressed (compressed data must fit into 64kb though so no 256x256 unless another decompressor is used)
+; ldr r0,landscapeLz4MapAddr
+; ldr r1,landscapeDataAAddr
+; bl lz4UtilsUnlz
+
+ ; otherwise just load it from the file
+ mov r0,#12
+ adr r1,landscapeMapDataFilename
+ ldr r2,landscapeDataAAddr
+ mov r3,#0
+ adr r4,landscapeMapDataFilepath
+ mov r5,#0
+ swi "OS_File"
+
+ ldr r0,landscapeDataAAddr
+ ldr r1,landscapeDataBAddr
+ ldr r2,landscapeDataSize
+ mov r2,r2,LSR #2
+ bl memUtilsCopyWords
+
+ mov r3,#1
+ .setupLandscapePoints
+  bl gfxUtilsSwitchScreenBank
+
+  ldr r1,gfxUtilsCurrentScreenBank
+  cmp r1,#1
+  bne setupLandscapePointsAddrBb
+   ldr r6,landscapePointsAddrBa
+  b setupLandscapePointsContinue
+  .setupLandscapePointsAddrBb
+   ldr r6,landscapePointsAddrBb
+  .setupLandscapePointsContinue
+
+  bl gfxUtilsUpdateScreenAddr
+
+  ; get screen address
+  ldr r0,gfxUtilsScreenAddr
+  ; get map address
+  ldr r1,landscapeDataAAddr
+
+  ldr r8,landscapePointsCount
+  .landscapeUpdatePoints
+   ; add screen address to point x/y
+   ldr r7,[r6]
+   add r7,r7,r0
+   str r7,[r6]
+   add r6,r6,#4
+   ; add map data address to point u/v address
+   ldr r7,[r6]
+   add r7,r7,r1
+   str r7,[r6]
+   add r6,r6,#4
+   ; add screen address to point x/y
+   ldr r7,[r6]
+   add r7,r7,r0
+   str r7,[r6]
+   add r6,r6,#4
+   ; add map data address to point u/v address
+   ldr r7,[r6]
+   add r7,r7,r1
+   str r7,[r6]
+   add r6,r6,#4
+   ; add screen address to point x/y
+   ldr r7,[r6]
+   add r7,r7,r0
+   str r7,[r6]
+   add r6,r6,#4
+   ; add map data address to point u/v address
+   ldr r7,[r6]
+   add r7,r7,r1
+   str r7,[r6]
+   add r6,r6,#4
+
+   sub r8,r8,#3
+   cmp r8,#0
+   bne landscapeUpdatePoints
+
+  sub r3,r3,#1
+  cmn r3,#1
+  bne setupLandscapePoints
+ ldr r15,landscapeReturnAddr
+
+.landscapeFrameAddr
+ dcd landscapeFrame
+.landscapeYOffsetAddr
+ dcd landscapeYOffset
+.landscapeDefaultOffsetAddr
+ dcd landscapeDefaultOffset
+.landscapeMapByteWidthAddr
+ dcd landscapeMapByteWidth
+.landscapeClearScreenStartY
+ dcd landConfBackClearStart%*screenWidth%
+.landscapeReturnAddr
+ dcd 0
+
+; DRAW
+.drawLandscape
+ ; save subroutine return address (maximize amount of available registers)
+ str r14,landscapeReturnAddr
+
+ ; = CLEAR BACKGROUND (just around landscape horizon)
+ ; first sky
+ bl gfxUtilsGetScreenAddr
+ ldr r11,landscapeClearScreenStartY
+ add r1,r0,r11
+ bl getskyBackgroundAddr
+ add r0,r0,r11
+]
+PROCgfxUtilsUnrollFullWidthImageDraw(55040-landConfBackClearStart%*screenWidth%)
+[ OPT bassPass%
+ ; = uncomment for simple horizon clear (no bitmap)
+; mov r1,#255 ; background clear color
+; orr r1,r1,r1, LSL #8
+; orr r1,r1,r1, LSL #16
+
+; mov r2,r1:mov r3,r1:mov r4,r1:mov r5,r1
+; mov r6,r1:mov r7,r1:mov r8,r1:mov r9,r1:mov r10,r1
+
+; bl gfxUtilsGetScreenAddr
+; ldr r11,landscapeClearScreenStartY
+; add r0,r0,r11
+REM ]
+REM FOR i%=0 TO landConfBackClearLen%*8-1
+REM  [ OPT bassPass%
+REM   stmia r0!,{r1-r10}
+REM  ]
+REM NEXT i%
+REM [ OPT bassPass%
+ ; =
+
+ ; get screen width in r13
+ ; the code adjusted to current resolution before
+ ; so that is a leftover, it is still used but screen width is now hardcoded into maps data
+ ; the code is no more resolution independent and require data adjusts
+ mvn r0,#0 ; -1, current mode
+ mov r1,#11
+ swi "OS_ReadModeVariable"
+ add r13,r2,#1
+
+ ; = compute Y boundary (to start clipping bottom blocks)
+ ; get screen height in r2
+ mvn r0,#0 ; -1, current mode
+ mov r1,#12
+ swi "OS_ReadModeVariable"
+ add r2,r2,#1
+
+ bl gfxUtilsGetScreenAddr
+ mov r1,r0
+
+ ; bottom screen boundary
+ mov r12,r2
+ mul r8,r13,r12
+ add r8,r1,r8
+
+ ; screenWidth * (screenHeight - blockHeight)
+ mov r12,r2
+ sub r12,r12,#blockHeight%
+ mul r11,r13,r12
+ add r1,r1,r11 ; add screen addr
+
+add r15,r15,#20
+.landscapePointsAddrBa2
+ dcd landscapePointsDataA
+.landscapePointsAddrBb2
+ dcd landscapePointsDataB
+.landscapeFrameAddr2
+ dcd landscapeFrame
+.landscapeYOffsetAddr2
+ dcd landscapeYOffset
+.landscapeDefaultOffsetAddr2
+ dcd landscapeDefaultOffset
+.landscapeMapByteWidthAddr2
+ dcd landscapeMapByteWidth
+
+ ; choose the correct points dataset following current screen bank
+ bl gfxUtilsGetCurrentScreenBank
+ cmp r0,#1
+ bne drawLandscapeChoseBb
+  ldr r0,landscapePointsAddrBa2
+ b drawLandscapeContinue
+ .drawLandscapeChoseBb
+  ldr r0,landscapePointsAddrBb2
+ .drawLandscapeContinue
+
+ ; limit the rate at which the landscape move
+ ldr r4,landscapeFrameAddr2
+ ldr r3,[r4]
+ add r3,r3,#1
+ str r3,[r4]
+ cmp r3,#2 ; higher = slower
+ ble landscapeNoMove
+  ; reset
+  mov r3,#0
+  str r3,[r4]
+
+  ; make it move
+  ldr r4,landscapeYOffsetAddr2
+  ldr r3,[r4]
+  ldr r10,landscapeMapByteWidthAddr2
+  ldr r10,[r10]
+  subs r3,r3,r10 ; go forward
+  ;cmp r3,#0
+  ; wrap when going out of bounds
+  bpl landscapeMapNoWrap
+   ; wrap colormap/heightmap
+   ldr r5,landscapeDefaultOffsetAddr2
+   ldr r3,[r5]
+  .landscapeMapNoWrap
+  str r3,[r4]
+ .landscapeNoMove
+
+ ldr r9,landscapeYOffsetAddr2
+ ldr r9,[r9]
+]
+
+PROClandscapeUnroll(points%,blockHeight%,blockStep%,screenWidth%)
+
+[ OPT bassPass%
+ ; return call is done at the end of PROClandscapeUnroll
+
+.landscapeMapByteWidth
+ dcd landscapeMapWidth%*landscapeMapDataSize%
+.landscapeYOffset
+ dcd 0
+.landscapeDefaultOffset
+ dcd landscapeMapWidth%*landscapeMapHeight%*landscapeMapDataSize%
+.landscapeFrame
+ dcd 0
+
+; copy every N lines of the screen (called after landscape draw routine)
+; only in case of blockStep > 1
+.copyLandscapeLines
+]
+
+IF blockStep% > 1 THEN
+ [ OPT bassPass%
+  mov r13,r14
+  bl gfxUtilsGetScreenAddr
+  mov r14,r13
+  mov r1,#screenWidth%
+  mov r2,#landConfStart%
+  mul r3,r1,r2
+  add r0,r0,r3
+ ]
+ PROCgfxUtilsUnrollStepCopy(320*landConfLen%,screenWidth%,blockStep%-1)
+ENDIF
+[ OPT bassPass%
+ mov r15,r14
+]
+=0
