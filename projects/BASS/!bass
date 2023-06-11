@@ -139,7 +139,7 @@ END
 REM ======= ERRORS HANDLER =======
 DEF PROConError
  ON ERROR OFF
- PRINT REPORT$;" at line ";ERL REM DIV 10
+ PRINT REPORT$;" at line ";ERL
  REM = close known file handles to avoid file locks
  IF bassSourcesFile% <> 0 THEN:CLOSE#bassSourcesFile%:bassSourcesFile%=0:ENDIF
  IF bassDataDefFile% <> 0 THEN:CLOSE#bassDataDefFile:bassDataDefFile%=0:ENDIF
